@@ -584,20 +584,28 @@ class EEGGuiBrowserEmbed:
             style = ttk.Style(self.root)
             if "clam" in style.theme_names():
                 style.theme_use("clam")
-            style.configure("TFrame", background="#F8FBFF")
-            style.configure("TLabel", background="#F8FBFF", foreground="#1E3A8A")
-            style.configure("TLabelFrame", background="#F8FBFF", foreground="#1E3A8A")
-            style.configure("TLabelFrame.Label", background="#F8FBFF", foreground="#2563EB")
-            style.configure("TButton", background="#E0F2FE", foreground="#1E3A8A", padding=(8, 4))
-            style.map("TButton", background=[("active", "#BFDBFE")])
-            style.configure("TCheckbutton", background="#F8FBFF", foreground="#1E3A8A")
-            style.configure("TRadiobutton", background="#F8FBFF", foreground="#1E3A8A")
-            style.configure("TCombobox", fieldbackground="#FFFFFF", foreground="#1E3A8A")
-            style.configure("TNotebook", background="#F8FBFF", borderwidth=0)
-            style.configure("TNotebook.Tab", background="#E0F2FE", foreground="#1E3A8A", padding=(12, 6))
-            style.map("TNotebook.Tab", background=[("selected", "#60A5FA")], foreground=[("selected", "#FFFFFF")])
-            self.root.configure(bg="#F8FBFF")
-            self.listbox.configure(background="#FFFFFF", foreground="#1E3A8A", highlightbackground="#BFDBFE")
+            style.configure("TFrame", background="#FFFFFF")
+            style.configure("TLabel", background="#FFFFFF", foreground="#14532D")
+            style.configure("TLabelFrame", background="#FFFFFF", foreground="#14532D")
+            style.configure("TLabelFrame.Label", background="#FFFFFF", foreground="#16A34A")
+            style.configure("TButton", background="#FFFFFF", foreground="#14532D", padding=(8, 4))
+            style.map(
+                "TButton",
+                background=[("active", "#16A34A"), ("pressed", "#16A34A")],
+                foreground=[("active", "#FFFFFF"), ("pressed", "#FFFFFF")],
+            )
+            style.configure("TCheckbutton", background="#FFFFFF", foreground="#14532D")
+            style.configure("TRadiobutton", background="#FFFFFF", foreground="#14532D")
+            style.configure("TCombobox", fieldbackground="#FFFFFF", foreground="#14532D")
+            style.configure("TNotebook", background="#FFFFFF", borderwidth=0)
+            style.configure("TNotebook.Tab", background="#FFFFFF", foreground="#14532D", padding=(12, 6))
+            style.map(
+                "TNotebook.Tab",
+                background=[("selected", "#16A34A")],
+                foreground=[("selected", "#FFFFFF")],
+            )
+            self.root.configure(bg="#FFFFFF")
+            self.listbox.configure(background="#FFFFFF", foreground="#14532D", highlightbackground="#BBF7D0")
         except Exception:
             pass
 

@@ -81,6 +81,23 @@ def _representative_epoch_idx(eeg: np.ndarray) -> int:
     return idx
 
 
+def _representative_epoch_idx_with_mask(eeg: np.ndarray, mask: np.ndarray) -> int:
+    """
+    带掩码的代表性 epoch：仅在 mask=True 的 epoch 中选择
+    """
+    if mask is None:
+        return _representative_epoch_idx(eeg)
+    rms_vec = _epoch_rms_vector(eeg)
+    if mask.shape[0] != rms_vec.shape[0]:
+        return _representative_epoch_idx(eeg)
+    valid = np.where(mask)[0]
+    if len(valid) == 0:
+        return _representative_epoch_idx(eeg)
+    med = np.nanmedian(rms_vec[valid])
+    idx_local = int(np.nanargmin(np.abs(rms_vec[valid] - med)))
+    return int(valid[idx_local])
+
+
 def _bandpowers_fft(x: np.ndarray, fs: int):
     """
     计算单通道信号的频段能量（基于 rFFT 的简洁实现）
@@ -354,6 +371,28 @@ class EEGGuiBrowserEmbed:
         )
         self.rms_combo.grid(row=10, column=1, sticky="w", padx=(8, 0), pady=(12, 0))
 
+        # 多 epoch 稳健统计 / 伪迹过滤
+        ttk.Label(right, text="统计/过滤：").grid(row=11, column=0, sticky="w", pady=(12, 0))
+        self.use_robust_epochs = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            right, text="代表性多 epoch", variable=self.use_robust_epochs
+        ).grid(row=12, column=0, columnspan=2, sticky="w")
+
+        ttk.Label(right, text="Epoch 数").grid(row=13, column=0, sticky="w", pady=(6, 0))
+        self.epoch_pool_entry = ttk.Entry(right, width=10)
+        self.epoch_pool_entry.insert(0, "20")
+        self.epoch_pool_entry.grid(row=13, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+
+        self.enable_artifact_filter = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            right, text="伪迹过滤 (RMS z)", variable=self.enable_artifact_filter
+        ).grid(row=14, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        ttk.Label(right, text="z阈值").grid(row=15, column=0, sticky="w", pady=(6, 0))
+        self.artifact_z_entry = ttk.Entry(right, width=10)
+        self.artifact_z_entry.insert(0, "3.5")
+        self.artifact_z_entry.grid(row=15, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+
         # 让右侧可以拉伸
         top.grid_columnconfigure(1, weight=1)
 
@@ -428,7 +467,11 @@ class EEGGuiBrowserEmbed:
         ttk.Label(ctrl, text="Feature").grid(row=0, column=0, sticky="w")
         self.region_feature_var = tk.StringVar(value="RMS")
         self.cb_region_feature = ttk.Combobox(
-            ctrl, textvariable=self.region_feature_var, values=["RMS", "Band power"], width=12, state="readonly"
+            ctrl,
+            textvariable=self.region_feature_var,
+            values=["RMS", "Band power", "Band ratio"],
+            width=12,
+            state="readonly",
         )
         self.cb_region_feature.grid(row=0, column=1, sticky="w", padx=(6, 14))
 
@@ -439,7 +482,18 @@ class EEGGuiBrowserEmbed:
         )
         self.cb_region_band.grid(row=0, column=3, sticky="w", padx=(6, 14))
 
-        ttk.Label(ctrl, text="Mode").grid(row=0, column=4, sticky="w")
+        ttk.Label(ctrl, text="Ratio").grid(row=0, column=4, sticky="w")
+        self.region_ratio_var = tk.StringVar(value="theta/alpha")
+        self.cb_region_ratio = ttk.Combobox(
+            ctrl,
+            textvariable=self.region_ratio_var,
+            values=["theta/alpha", "(theta+delta)/alpha"],
+            width=16,
+            state="readonly",
+        )
+        self.cb_region_ratio.grid(row=0, column=5, sticky="w", padx=(6, 14))
+
+        ttk.Label(ctrl, text="Mode").grid(row=0, column=6, sticky="w")
         self.region_mode_var = tk.StringVar(value="Δ (Fatigue-Alert)")
         self.cb_region_mode = ttk.Combobox(
             ctrl,
@@ -448,14 +502,14 @@ class EEGGuiBrowserEmbed:
             width=16,
             state="readonly",
         )
-        self.cb_region_mode.grid(row=0, column=5, sticky="w", padx=(6, 14))
+        self.cb_region_mode.grid(row=0, column=7, sticky="w", padx=(6, 14))
 
-        ttk.Label(ctrl, text="Agg").grid(row=0, column=6, sticky="w")
+        ttk.Label(ctrl, text="Agg").grid(row=0, column=8, sticky="w")
         self.region_agg_var = tk.StringVar(value="mean")
         self.cb_region_agg = ttk.Combobox(
             ctrl, textvariable=self.region_agg_var, values=["mean", "median"], width=8, state="readonly"
         )
-        self.cb_region_agg.grid(row=0, column=7, sticky="w", padx=(6, 0))
+        self.cb_region_agg.grid(row=0, column=9, sticky="w", padx=(6, 0))
 
         # Figure
         self.fig_region = Figure(figsize=(8.8, 4.6), dpi=100)
@@ -468,6 +522,7 @@ class EEGGuiBrowserEmbed:
         # 控件联动：任意变化都更新脑区图
         self.region_feature_var.trace_add("write", lambda *args: self.update_region_plot())
         self.region_band_var.trace_add("write", lambda *args: self.update_region_plot())
+        self.region_ratio_var.trace_add("write", lambda *args: self.update_region_plot())
         self.region_mode_var.trace_add("write", lambda *args: self.update_region_plot())
         self.region_agg_var.trace_add("write", lambda *args: self.update_region_plot())
 
@@ -495,6 +550,61 @@ class EEGGuiBrowserEmbed:
         self._cache[key] = eeg
         return eeg
 
+    def _parse_epoch_pool(self) -> int:
+        try:
+            n = int(self.epoch_pool_entry.get())
+            return max(0, n)
+        except Exception:
+            return 0
+
+    def _parse_artifact_z(self) -> float:
+        try:
+            return float(self.artifact_z_entry.get())
+        except Exception:
+            return 3.5
+
+    def _epoch_selection_mask(self, rms_e: np.ndarray) -> np.ndarray:
+        if rms_e is None or len(rms_e) == 0:
+            return np.array([], dtype=bool)
+
+        mask = np.ones(len(rms_e), dtype=bool)
+
+        if self.enable_artifact_filter.get():
+            z = _robust_zscore(rms_e)
+            z_th = self._parse_artifact_z()
+            mask &= np.abs(z) <= z_th
+
+        if self.use_robust_epochs.get():
+            n = self._parse_epoch_pool()
+            if n > 0:
+                valid = np.where(mask)[0]
+                if len(valid) > n:
+                    med = np.nanmedian(rms_e[valid])
+                    order = np.argsort(np.abs(rms_e[valid] - med))
+                    keep = valid[order[:n]]
+                    new_mask = np.zeros_like(mask, dtype=bool)
+                    new_mask[keep] = True
+                    mask = new_mask
+
+        return mask
+
+    def _band_ratio_log(self, bp_lin: dict, ratio_name: str) -> np.ndarray:
+        if bp_lin is None:
+            return None
+        if ratio_name == "theta/alpha":
+            num = bp_lin.get("theta")
+            den = bp_lin.get("alpha")
+        elif ratio_name == "(theta+delta)/alpha":
+            num = bp_lin.get("theta")
+            den = bp_lin.get("alpha")
+            if num is not None and bp_lin.get("delta") is not None:
+                num = num + bp_lin.get("delta")
+        else:
+            return None
+        if num is None or den is None:
+            return None
+        ratio = num / np.maximum(den, 1e-20)
+        return np.log10(np.maximum(ratio, 1e-20))
 
     def _get_metrics(self, sid: str, sess: str):
         """
@@ -502,6 +612,7 @@ class EEGGuiBrowserEmbed:
         - rms: (E,C)
         - bp_lin: dict {band: (E,C)} （Welch 线性域）
         - bp_log: dict {band: (E,C)} （log10 版本，更适合展示/对比）
+        - ratio_log: dict {ratio: (E,C)}（log10 频段比值）
         """
         key = (sid, sess)
         if hasattr(self, "_metric_cache") and key in self._metric_cache:
@@ -522,14 +633,19 @@ class EEGGuiBrowserEmbed:
         # log10 版本：避免动态范围过大
         bp_log = {b: np.log10(np.maximum(mat, 1e-20)) for b, mat in bp_lin.items()}
 
-        out = {"rms": rms, "bp_lin": bp_lin, "bp_log": bp_log}
+        ratio_log = {
+            "theta/alpha": self._band_ratio_log(bp_lin, "theta/alpha"),
+            "(theta+delta)/alpha": self._band_ratio_log(bp_lin, "(theta+delta)/alpha"),
+        }
+
+        out = {"rms": rms, "bp_lin": bp_lin, "bp_log": bp_log, "ratio_log": ratio_log}
 
         if not hasattr(self, "_metric_cache"):
             self._metric_cache = {}
         self._metric_cache[key] = out
         return out
 
-    def _region_aggregate(self, mat_ec: np.ndarray, agg: str = "mean"):
+    def _region_aggregate(self, mat_ec: np.ndarray, agg: str = "mean", epoch_mask: np.ndarray = None):
         """
         将通道级矩阵聚合到脑区级（输出每个脑区一个标量）。
         输入：
@@ -543,6 +659,11 @@ class EEGGuiBrowserEmbed:
 
         if agg not in ("mean", "median"):
             agg = "mean"
+
+        if mat_ec.ndim == 2 and epoch_mask is not None and len(epoch_mask) == mat_ec.shape[0]:
+            mat_ec = mat_ec[epoch_mask]
+        if mat_ec.ndim == 2 and mat_ec.shape[0] == 0:
+            return {region: np.nan for region in self.regions.keys()}
 
         out = {}
         for region, chs in self.regions.items():
@@ -584,24 +705,34 @@ class EEGGuiBrowserEmbed:
 
         feature = self.region_feature_var.get()
         band = self.region_band_var.get()
+        ratio = self.region_ratio_var.get()
         mode = self.region_mode_var.get()
         agg = self.region_agg_var.get()
 
-        # Feature=RMS 时禁用 Band 选择
+        # Feature=RMS 时禁用 Band/Ratio 选择
         if feature == "RMS":
             try:
                 self.cb_region_band.configure(state="disabled")
+                self.cb_region_ratio.configure(state="disabled")
+            except Exception:
+                pass
+        elif feature == "Band power":
+            try:
+                self.cb_region_band.configure(state="readonly")
+                self.cb_region_ratio.configure(state="disabled")
             except Exception:
                 pass
         else:
             try:
-                self.cb_region_band.configure(state="readonly")
+                self.cb_region_band.configure(state="disabled")
+                self.cb_region_ratio.configure(state="readonly")
             except Exception:
                 pass
 
         mat = None
         ylabel = ""
         title_mode = mode
+        epoch_mask = None
 
         if mode == "EEG1 (Alert)":
             m1 = self._get_metrics(sid, "EEG1")
@@ -610,9 +741,15 @@ class EEGGuiBrowserEmbed:
             if feature == "RMS":
                 mat = m1["rms"]
                 ylabel = "RMS (a.u.)"
-            else:
+                epoch_mask = self._epoch_selection_mask(np.nanmean(m1["rms"], axis=1))
+            elif feature == "Band power":
                 mat = m1["bp_log"][band]
                 ylabel = f"log10 band power ({band})"
+                epoch_mask = self._epoch_selection_mask(np.nanmean(m1["rms"], axis=1))
+            else:
+                mat = m1["ratio_log"][ratio]
+                ylabel = f"log10 ratio ({ratio})"
+                epoch_mask = self._epoch_selection_mask(np.nanmean(m1["rms"], axis=1))
             bar_color = "#E91E63"  # EEG1：粉色
         elif mode == "EEG4 (Fatigue)":
             m4 = self._get_metrics(sid, "EEG4")
@@ -621,9 +758,15 @@ class EEGGuiBrowserEmbed:
             if feature == "RMS":
                 mat = m4["rms"]
                 ylabel = "RMS (a.u.)"
-            else:
+                epoch_mask = self._epoch_selection_mask(np.nanmean(m4["rms"], axis=1))
+            elif feature == "Band power":
                 mat = m4["bp_log"][band]
                 ylabel = f"log10 band power ({band})"
+                epoch_mask = self._epoch_selection_mask(np.nanmean(m4["rms"], axis=1))
+            else:
+                mat = m4["ratio_log"][ratio]
+                ylabel = f"log10 ratio ({ratio})"
+                epoch_mask = self._epoch_selection_mask(np.nanmean(m4["rms"], axis=1))
             bar_color = "#1F77B4"  # EEG4：蓝色
         else:
             m1 = self._get_metrics(sid, "EEG1")
@@ -631,14 +774,31 @@ class EEGGuiBrowserEmbed:
             if (m1 is None) or (m4 is None):
                 return
             if feature == "RMS":
-                mat = m4["rms"] - m1["rms"]
+                E = min(m1["rms"].shape[0], m4["rms"].shape[0])
+                mat = m4["rms"][:E] - m1["rms"][:E]
                 ylabel = "ΔRMS (Fatigue − Alert)"
-            else:
-                mat = m4["bp_log"][band] - m1["bp_log"][band]  # log 域差值 = log ratio
+                rms_e = 0.5 * (np.nanmean(m1["rms"], axis=1)[:E] + np.nanmean(m4["rms"], axis=1)[:E])
+                epoch_mask = self._epoch_selection_mask(rms_e)
+            elif feature == "Band power":
+                E = min(m1["bp_log"][band].shape[0], m4["bp_log"][band].shape[0])
+                mat = m4["bp_log"][band][:E] - m1["bp_log"][band][:E]  # log 域差值 = log ratio
                 ylabel = f"Δ log10 power ({band})"
+                rms_e = 0.5 * (np.nanmean(m1["rms"], axis=1)[:E] + np.nanmean(m4["rms"], axis=1)[:E])
+                epoch_mask = self._epoch_selection_mask(rms_e)
+            else:
+                E = min(m1["ratio_log"][ratio].shape[0], m4["ratio_log"][ratio].shape[0])
+                mat = m4["ratio_log"][ratio][:E] - m1["ratio_log"][ratio][:E]
+                ylabel = f"Δ log10 ratio ({ratio})"
+                rms_e = 0.5 * (np.nanmean(m1["rms"], axis=1)[:E] + np.nanmean(m4["rms"], axis=1)[:E])
+                epoch_mask = self._epoch_selection_mask(rms_e)
             bar_color = None  # Δ：按正负着色
 
-        region_vals = self._region_aggregate(mat, agg=agg)
+        if epoch_mask is not None and mat is not None and mat.ndim == 2:
+            E = min(mat.shape[0], len(epoch_mask))
+            mat = mat[:E]
+            epoch_mask = epoch_mask[:E]
+
+        region_vals = self._region_aggregate(mat, agg=agg, epoch_mask=epoch_mask)
         if region_vals is None:
             return
 
@@ -715,15 +875,21 @@ class EEGGuiBrowserEmbed:
                     raise ValueError("对比模式需要同时存在 EEG1 与 EEG4。")
 
                 # 代表性 epoch：对两个状态分别取 RMS 中位数 idx，然后取其平均更稳
-                idx1 = _representative_epoch_idx(eeg1)
-                idx4 = _representative_epoch_idx(eeg4)
+                rms1 = _epoch_rms_vector(eeg1)
+                rms4 = _epoch_rms_vector(eeg4)
+                mask1 = self._epoch_selection_mask(rms1)
+                mask4 = self._epoch_selection_mask(rms4)
+                idx1 = _representative_epoch_idx_with_mask(eeg1, mask1)
+                idx4 = _representative_epoch_idx_with_mask(eeg4, mask4)
                 rep = int(round((idx1 + idx4) / 2))
             else:
                 sess = self.session_var.get().upper()
                 eeg = self._load_eeg(sid, sess)
                 if eeg is None:
                     raise ValueError(f"缺少 {sess}")
-                rep = _representative_epoch_idx(eeg)
+                rms = _epoch_rms_vector(eeg)
+                mask = self._epoch_selection_mask(rms)
+                rep = _representative_epoch_idx_with_mask(eeg, mask)
 
             self.epoch_entry.delete(0, tk.END)
             self.epoch_entry.insert(0, str(rep))

@@ -286,6 +286,7 @@ class EEGGuiBrowserEmbed:
         self.fs = fs
         self.subjects = scan_subject_files(root_dir)
         self._has_loaded = False
+        self._last_selected_index = 0
 
         if len(self.subjects) == 0:
             raise RuntimeError("未识别到 *_EEG1.npy / *_EEG4.npy 文件，请检查命名或目录。")
@@ -328,6 +329,7 @@ class EEGGuiBrowserEmbed:
             self.listbox.insert(tk.END, f"{sid}   [EEG{tag1}/EEG{tag4}]")
 
         self.listbox.selection_set(0)
+        self._last_selected_index = 0
 
         # 右：控制区
         right = ttk.Frame(top)
@@ -563,7 +565,7 @@ class EEGGuiBrowserEmbed:
 
         # 绑定：切换 RMS 模式时刷新（如果已加载过）
         self.rms_combo.bind("<<ComboboxSelected>>", lambda _e: self.on_preview())
-        self.listbox.bind("<<ListboxSelect>>", lambda _e: self._maybe_preview())
+        self.listbox.bind("<<ListboxSelect>>", lambda _e: self._on_subject_select())
         self.compare_var.trace_add("write", lambda *_: self._on_mode_toggle())
         self.session_var.trace_add("write", lambda *_: self._maybe_preview())
         self.use_robust_epochs.trace_add("write", lambda *_: self._maybe_preview())
@@ -596,6 +598,12 @@ class EEGGuiBrowserEmbed:
     def _maybe_preview(self):
         if self._has_loaded:
             self.on_preview()
+
+    def _on_subject_select(self):
+        idxs = self.listbox.curselection()
+        if idxs:
+            self._last_selected_index = int(idxs[0])
+        self._maybe_preview()
 
     def _on_mode_toggle(self):
         if self.compare_var.get():
@@ -896,8 +904,16 @@ class EEGGuiBrowserEmbed:
     def get_selected_subject(self):
         idxs = self.listbox.curselection()
         if not idxs:
+            if self.sub_ids:
+                idx = min(max(self._last_selected_index, 0), len(self.sub_ids) - 1)
+                self.listbox.selection_set(idx)
+                self.listbox.activate(idx)
+                self._last_selected_index = idx
+                return self.sub_ids[idx]
             return None
-        return self.sub_ids[int(idxs[0])]
+        idx = int(idxs[0])
+        self._last_selected_index = idx
+        return self.sub_ids[idx]
 
     def on_show_path(self):
         sid = self.get_selected_subject()

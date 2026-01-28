@@ -1110,7 +1110,6 @@ class EEGGuiBrowserEmbed:
         self.ax_bp_a.spines["top"].set_visible(False)
         self.ax_bp_a.spines["right"].set_visible(False)
 
-        self.fig_single.tight_layout()
         self.canvas_single.draw()
 
     def _draw_single_and_bandpower_compare(self, sid, epoch_a, ch_a, eeg1, sess1, epoch_f, ch_f, eeg4, sess4):
@@ -1163,7 +1162,6 @@ class EEGGuiBrowserEmbed:
         self.ax_bp_f.spines["top"].set_visible(False)
         self.ax_bp_f.spines["right"].set_visible(False)
 
-        self.fig_single.tight_layout()
         self.canvas_single.draw()
 
     # ---------- 绘图：多通道叠加 ----------
@@ -1184,7 +1182,6 @@ class EEGGuiBrowserEmbed:
         # 右列隐藏
         self._hide_axis(self.ax_multi_f)
 
-        self.fig_multi.tight_layout()
         self.canvas_multi.draw()
 
     def _draw_stacked_compare(self, sid, epoch_a, eeg1, sess1, epoch_f, eeg4, sess4):
@@ -1212,7 +1209,6 @@ class EEGGuiBrowserEmbed:
             linewidth=0.7,
         )
 
-        self.fig_multi.tight_layout()
         self.canvas_multi.draw()
 
     def _update_single_layout(self, compare: bool):
@@ -1225,11 +1221,13 @@ class EEGGuiBrowserEmbed:
             self.ax_bp_f.set_visible(True)
             self.ax_wv_f.set_axis_on()
             self.ax_bp_f.set_axis_on()
+            self.fig_single.subplots_adjust(left=0.06, right=0.98, bottom=0.08, top=0.92, wspace=0.25, hspace=0.35)
         else:
             self.ax_wv_a.set_position([0.08, 0.55, 0.86, 0.35])
             self.ax_bp_a.set_position([0.08, 0.10, 0.86, 0.35])
             self.ax_wv_f.set_visible(False)
             self.ax_bp_f.set_visible(False)
+            self.fig_single.subplots_adjust(left=0.06, right=0.98, bottom=0.08, top=0.92)
         self.canvas_single.draw()
 
     def _update_multi_layout(self, compare: bool):
@@ -1238,9 +1236,11 @@ class EEGGuiBrowserEmbed:
             self.ax_multi_f.set_position(self._multi_layout_positions["multi_f"])
             self.ax_multi_f.set_visible(True)
             self.ax_multi_f.set_axis_on()
+            self.fig_multi.subplots_adjust(left=0.06, right=0.98, bottom=0.08, top=0.92, wspace=0.25)
         else:
             self.ax_multi_a.set_position([0.08, 0.12, 0.86, 0.78])
             self.ax_multi_f.set_visible(False)
+            self.fig_multi.subplots_adjust(left=0.06, right=0.98, bottom=0.08, top=0.92)
         self.canvas_multi.draw()
 
     # ---------- 绘图：RMS / ΔRMS ----------

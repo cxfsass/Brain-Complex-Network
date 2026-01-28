@@ -31,6 +31,11 @@ matplotlib.rcParams["axes.unicode_minus"] = False  # 避免负号显示异常
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
+ALERT_COLOR = "#E91E63"
+FATIGUE_COLOR = "#1F77B4"
+DELTA_POS_COLOR = "#D32F2F"
+DELTA_NEG_COLOR = "#1976D2"
+
 
 def scan_subject_files(root_dir: str):
     """
@@ -280,6 +285,7 @@ class EEGGuiBrowserEmbed:
         self.root_dir = root_dir
         self.fs = fs
         self.subjects = scan_subject_files(root_dir)
+        self._has_loaded = False
 
         if len(self.subjects) == 0:
             raise RuntimeError("未识别到 *_EEG1.npy / *_EEG4.npy 文件，请检查命名或目录。")
@@ -296,6 +302,10 @@ class EEGGuiBrowserEmbed:
 
         self.root = tk.Tk()
         self.root.title("EEG NPY Browser (Embedded Plots)")
+        try:
+            self.root.option_add("*Font", ("Microsoft YaHei", 10))
+        except Exception:
+            pass
 
         # ========== 顶部布局：左（被试） + 右（控制） ==========
         top = ttk.Frame(self.root, padding=10)
@@ -323,75 +333,83 @@ class EEGGuiBrowserEmbed:
         right = ttk.Frame(top)
         right.grid(row=0, column=1, sticky="nsew", padx=(16, 0))
 
-        ttk.Label(right, text=f"数据目录：{self.root_dir}").grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(right, text=f"数据目录：{self.root_dir}").grid(row=0, column=0, sticky="w")
 
-        # 对比模式
+        mode_frame = ttk.LabelFrame(right, text="模式选择", padding=(10, 6))
+        mode_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
         self.compare_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(right, text="Alert vs Fatigue 对比模式", variable=self.compare_var).grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=(10, 0)
+        ttk.Checkbutton(mode_frame, text="Alert vs Fatigue 对比模式", variable=self.compare_var).grid(
+            row=0, column=0, columnspan=2, sticky="w"
         )
 
-        # Session 单独模式仍可用（非对比模式时生效）
-        ttk.Label(right, text="选择 Session（非对比模式）：").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(mode_frame, text="Session（非对比）：").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.session_var = tk.StringVar(value="EEG1")
-        ttk.Radiobutton(right, text="EEG1 (alert)", value="EEG1", variable=self.session_var).grid(row=3, column=0, sticky="w")
-        ttk.Radiobutton(right, text="EEG4 (fatigue)", value="EEG4", variable=self.session_var).grid(row=4, column=0, sticky="w")
+        ttk.Radiobutton(mode_frame, text="EEG1 (alert)", value="EEG1", variable=self.session_var).grid(row=2, column=0, sticky="w")
+        ttk.Radiobutton(mode_frame, text="EEG4 (fatigue)", value="EEG4", variable=self.session_var).grid(row=3, column=0, sticky="w")
 
-        ttk.Label(right, text="预览参数：").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        preview_frame = ttk.LabelFrame(right, text="预览参数", padding=(10, 6))
+        preview_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
-        ttk.Label(right, text="Epoch idx").grid(row=6, column=0, sticky="w")
-        self.epoch_entry = ttk.Entry(right, width=10)
+        ttk.Label(preview_frame, text="Epoch idx").grid(row=0, column=0, sticky="w")
+        self.epoch_entry = ttk.Entry(preview_frame, width=10)
         self.epoch_entry.insert(0, "0")
-        self.epoch_entry.grid(row=6, column=1, sticky="w", padx=(8, 0))
+        self.epoch_entry.grid(row=0, column=1, sticky="w", padx=(8, 0))
 
-        ttk.Label(right, text="Channel idx").grid(row=7, column=0, sticky="w", pady=(6, 0))
-        self.channel_entry = ttk.Entry(right, width=10)
+        ttk.Label(preview_frame, text="Channel idx").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.channel_entry = ttk.Entry(preview_frame, width=10)
         self.channel_entry.insert(0, "0")
-        self.channel_entry.grid(row=7, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+        self.channel_entry.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
 
-        # 代表性 epoch
-        self.rep_btn = ttk.Button(right, text="使用代表性 epoch", command=self.on_pick_representative_epoch)
-        self.rep_btn.grid(row=8, column=0, sticky="w", pady=(10, 0))
+        self.data_info_label = ttk.Label(preview_frame, text="数据范围：未加载")
+        self.data_info_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
-        self.load_btn = ttk.Button(right, text="加载并预览（嵌入GUI）", command=self.on_preview)
-        self.load_btn.grid(row=9, column=0, sticky="w", pady=(10, 0))
+        self.rep_btn = ttk.Button(preview_frame, text="使用代表性 epoch", command=self.on_pick_representative_epoch)
+        self.rep_btn.grid(row=3, column=0, sticky="w", pady=(8, 0))
 
-        self.path_btn = ttk.Button(right, text="查看文件路径", command=self.on_show_path)
-        self.path_btn.grid(row=9, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
+        self.load_btn = ttk.Button(preview_frame, text="加载并预览", command=self.on_preview)
+        self.load_btn.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
 
-        # RMS 显示模式
-        ttk.Label(right, text="RMS 显示：").grid(row=10, column=0, sticky="w", pady=(12, 0))
+        action_frame = ttk.Frame(preview_frame)
+        action_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.path_btn = ttk.Button(action_frame, text="查看文件路径", command=self.on_show_path)
+        self.path_btn.grid(row=0, column=0, sticky="w")
+        self.reset_btn = ttk.Button(action_frame, text="重置设置", command=self.on_reset_controls)
+        self.reset_btn.grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+        stats_frame = ttk.LabelFrame(right, text="统计/过滤", padding=(10, 6))
+        stats_frame.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+
+        ttk.Label(stats_frame, text="RMS 显示：").grid(row=0, column=0, sticky="w")
         self.rms_mode = tk.StringVar(value="Alert")
         self.rms_combo = ttk.Combobox(
-            right,
+            stats_frame,
             textvariable=self.rms_mode,
             values=["Alert", "Fatigue", "ΔRMS(F-A)"],
             width=12,
             state="readonly",
         )
-        self.rms_combo.grid(row=10, column=1, sticky="w", padx=(8, 0), pady=(12, 0))
+        self.rms_combo.grid(row=0, column=1, sticky="w", padx=(8, 0))
 
-        # 多 epoch 稳健统计 / 伪迹过滤
-        ttk.Label(right, text="统计/过滤：").grid(row=11, column=0, sticky="w", pady=(12, 0))
         self.use_robust_epochs = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            right, text="代表性多 epoch", variable=self.use_robust_epochs
-        ).grid(row=12, column=0, columnspan=2, sticky="w")
+            stats_frame, text="代表性多 epoch", variable=self.use_robust_epochs
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        ttk.Label(right, text="Epoch 数").grid(row=13, column=0, sticky="w", pady=(6, 0))
-        self.epoch_pool_entry = ttk.Entry(right, width=10)
+        ttk.Label(stats_frame, text="Epoch 数").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.epoch_pool_entry = ttk.Entry(stats_frame, width=10)
         self.epoch_pool_entry.insert(0, "20")
-        self.epoch_pool_entry.grid(row=13, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+        self.epoch_pool_entry.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
 
         self.enable_artifact_filter = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            right, text="伪迹过滤 (RMS z)", variable=self.enable_artifact_filter
-        ).grid(row=14, column=0, columnspan=2, sticky="w", pady=(6, 0))
+            stats_frame, text="伪迹过滤 (RMS z)", variable=self.enable_artifact_filter
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
-        ttk.Label(right, text="z阈值").grid(row=15, column=0, sticky="w", pady=(6, 0))
-        self.artifact_z_entry = ttk.Entry(right, width=10)
+        ttk.Label(stats_frame, text="z阈值").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        self.artifact_z_entry = ttk.Entry(stats_frame, width=10)
         self.artifact_z_entry.insert(0, "3.5")
-        self.artifact_z_entry.grid(row=15, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+        self.artifact_z_entry.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
 
         # 让右侧可以拉伸
         top.grid_columnconfigure(1, weight=1)
@@ -417,6 +435,12 @@ class EEGGuiBrowserEmbed:
         self.ax_wv_f = self.fig_single.add_subplot(2, 2, 2)   # waveform fatigue
         self.ax_bp_a = self.fig_single.add_subplot(2, 2, 3)   # bandpower alert
         self.ax_bp_f = self.fig_single.add_subplot(2, 2, 4)   # bandpower fatigue
+        self._single_layout_positions = {
+            "wv_a": self.ax_wv_a.get_position().frozen(),
+            "wv_f": self.ax_wv_f.get_position().frozen(),
+            "bp_a": self.ax_bp_a.get_position().frozen(),
+            "bp_f": self.ax_bp_f.get_position().frozen(),
+        }
 
         self.canvas_single = FigureCanvasTkAgg(self.fig_single, master=self.tab_single)
         self.canvas_single.get_tk_widget().pack(fill="both", expand=True)
@@ -427,6 +451,10 @@ class EEGGuiBrowserEmbed:
         self.fig_multi = Figure(figsize=(9.2, 5.2), dpi=100)
         self.ax_multi_a = self.fig_multi.add_subplot(1, 2, 1)
         self.ax_multi_f = self.fig_multi.add_subplot(1, 2, 2)
+        self._multi_layout_positions = {
+            "multi_a": self.ax_multi_a.get_position().frozen(),
+            "multi_f": self.ax_multi_f.get_position().frozen(),
+        }
 
         self.canvas_multi = FigureCanvasTkAgg(self.fig_multi, master=self.tab_multi)
         self.canvas_multi.get_tk_widget().pack(fill="both", expand=True)
@@ -493,7 +521,7 @@ class EEGGuiBrowserEmbed:
         )
         self.cb_region_ratio.grid(row=0, column=5, sticky="w", padx=(6, 14))
 
-        ttk.Label(ctrl, text="Mode").grid(row=0, column=6, sticky="w")
+        ttk.Label(ctrl, text="Mode").grid(row=1, column=0, sticky="w")
         self.region_mode_var = tk.StringVar(value="Δ (Fatigue-Alert)")
         self.cb_region_mode = ttk.Combobox(
             ctrl,
@@ -502,14 +530,14 @@ class EEGGuiBrowserEmbed:
             width=16,
             state="readonly",
         )
-        self.cb_region_mode.grid(row=0, column=7, sticky="w", padx=(6, 14))
+        self.cb_region_mode.grid(row=1, column=1, sticky="w", padx=(6, 14))
 
-        ttk.Label(ctrl, text="Agg").grid(row=0, column=8, sticky="w")
+        ttk.Label(ctrl, text="Agg").grid(row=1, column=2, sticky="w")
         self.region_agg_var = tk.StringVar(value="mean")
         self.cb_region_agg = ttk.Combobox(
             ctrl, textvariable=self.region_agg_var, values=["mean", "median"], width=8, state="readonly"
         )
-        self.cb_region_agg.grid(row=0, column=9, sticky="w", padx=(6, 0))
+        self.cb_region_agg.grid(row=1, column=3, sticky="w", padx=(6, 0))
 
         # Figure
         self.fig_region = Figure(figsize=(8.8, 4.6), dpi=100)
@@ -535,6 +563,15 @@ class EEGGuiBrowserEmbed:
 
         # 绑定：切换 RMS 模式时刷新（如果已加载过）
         self.rms_combo.bind("<<ComboboxSelected>>", lambda _e: self.on_preview())
+        self.listbox.bind("<<ListboxSelect>>", lambda _e: self._maybe_preview())
+        self.compare_var.trace_add("write", lambda *_: self._on_mode_toggle())
+        self.session_var.trace_add("write", lambda *_: self._maybe_preview())
+        self.use_robust_epochs.trace_add("write", lambda *_: self._maybe_preview())
+        self.enable_artifact_filter.trace_add("write", lambda *_: self._maybe_preview())
+
+        self.status_var = tk.StringVar(value="就绪")
+        self.status_bar = ttk.Label(self.root, textvariable=self.status_var, relief="sunken", anchor="w")
+        self.status_bar.grid(row=2, column=0, sticky="ew")
 
     # ---------- 数据加载 ----------
     def _load_eeg(self, sid: str, sess: str):
@@ -549,6 +586,40 @@ class EEGGuiBrowserEmbed:
         eeg = _safe_load_npy(path)
         self._cache[key] = eeg
         return eeg
+
+    def _set_status(self, text: str):
+        try:
+            self.status_var.set(text)
+        except Exception:
+            pass
+
+    def _maybe_preview(self):
+        if self._has_loaded:
+            self.on_preview()
+
+    def _on_mode_toggle(self):
+        if self.compare_var.get():
+            try:
+                self.rms_mode.set("ΔRMS(F-A)")
+            except Exception:
+                pass
+        self._maybe_preview()
+
+    def on_reset_controls(self):
+        self.compare_var.set(False)
+        self.session_var.set("EEG1")
+        self.rms_mode.set("Alert")
+        self.use_robust_epochs.set(True)
+        self.enable_artifact_filter.set(True)
+        self.epoch_entry.delete(0, tk.END)
+        self.epoch_entry.insert(0, "0")
+        self.channel_entry.delete(0, tk.END)
+        self.channel_entry.insert(0, "0")
+        self.epoch_pool_entry.delete(0, tk.END)
+        self.epoch_pool_entry.insert(0, "20")
+        self.artifact_z_entry.delete(0, tk.END)
+        self.artifact_z_entry.insert(0, "3.5")
+        self._set_status("设置已重置")
 
     def _parse_epoch_pool(self) -> int:
         try:
@@ -750,7 +821,7 @@ class EEGGuiBrowserEmbed:
                 mat = m1["ratio_log"][ratio]
                 ylabel = f"log10 ratio ({ratio})"
                 epoch_mask = self._epoch_selection_mask(np.nanmean(m1["rms"], axis=1))
-            bar_color = "#E91E63"  # EEG1：粉色
+            bar_color = ALERT_COLOR  # EEG1：粉色
         elif mode == "EEG4 (Fatigue)":
             m4 = self._get_metrics(sid, "EEG4")
             if m4 is None:
@@ -767,7 +838,7 @@ class EEGGuiBrowserEmbed:
                 mat = m4["ratio_log"][ratio]
                 ylabel = f"log10 ratio ({ratio})"
                 epoch_mask = self._epoch_selection_mask(np.nanmean(m4["rms"], axis=1))
-            bar_color = "#1F77B4"  # EEG4：蓝色
+            bar_color = FATIGUE_COLOR  # EEG4：蓝色
         else:
             m1 = self._get_metrics(sid, "EEG1")
             m4 = self._get_metrics(sid, "EEG4")
@@ -808,7 +879,7 @@ class EEGGuiBrowserEmbed:
         if bar_color is not None:
             colors = [bar_color] * len(vals)
         else:
-            colors = ["#D32F2F" if (not np.isnan(v) and v >= 0) else "#1976D2" for v in vals]
+            colors = [DELTA_POS_COLOR if (not np.isnan(v) and v >= 0) else DELTA_NEG_COLOR for v in vals]
 
         self.ax_region.clear()
         self.ax_region.bar(regions, vals, color=colors, edgecolor="black", linewidth=0.6)
@@ -893,6 +964,8 @@ class EEGGuiBrowserEmbed:
 
             self.epoch_entry.delete(0, tk.END)
             self.epoch_entry.insert(0, str(rep))
+            self._set_status(f"代表性 epoch 已更新：{rep}")
+            self._maybe_preview()
         except Exception as e:
             messagebox.showerror("错误", f"代表性 epoch 计算失败：\n{e}")
 
@@ -930,10 +1003,12 @@ class EEGGuiBrowserEmbed:
                 ch_f = max(0, min(channel_idx, C4 - 1))
 
                 # --- 1) 单通道波形 + 频段能量（并排） ---
+                self._update_single_layout(compare=True)
                 self._draw_single_and_bandpower_compare(sid, epoch_a, ch_a, eeg1, "EEG1",
                                                        epoch_f, ch_f, eeg4, "EEG4")
 
                 # --- 2) 多通道叠加（论文级，并排） ---
+                self._update_multi_layout(compare=True)
                 self._draw_stacked_compare(sid, epoch_a, eeg1, "EEG1", epoch_f, eeg4, "EEG4")
 
                 # --- 3) RMS / ΔRMS ---
@@ -953,9 +1028,11 @@ class EEGGuiBrowserEmbed:
                 channel_idx = max(0, min(channel_idx, C - 1))
 
                 # 单通道 + 频段能量：仅使用左列，右列隐藏
+                self._update_single_layout(compare=False)
                 self._draw_single_and_bandpower_single(sid, sess, eeg, epoch_idx, channel_idx)
 
                 # 多通道叠加：仅左列绘制，右列隐藏
+                self._update_multi_layout(compare=False)
                 self._draw_stacked_single(sid, sess, eeg, epoch_idx)
 
                 # RMS：按下拉框显示（Alert/Fatigue/ΔRMS）；单模式下 ΔRMS 将提示
@@ -963,9 +1040,17 @@ class EEGGuiBrowserEmbed:
 
             # 更新脑区对比 Tab
             self.update_region_plot()
+            self._has_loaded = True
+            if compare:
+                self.data_info_label.config(text=f"EEG1: E={E1} C={C1} T={T1} | EEG4: E={E4} C={C4} T={T4}")
+                self._set_status(f"已加载 {sid} | 对比模式 | Epoch {epoch_idx} | Ch {channel_idx}")
+            else:
+                self.data_info_label.config(text=f"{sess}: E={E} C={C} T={T}")
+                self._set_status(f"已加载 {sid} | {sess} | Epoch {epoch_idx} | Ch {channel_idx}")
 
         except Exception as e:
             messagebox.showerror("错误", f"加载/绘图失败：\n{e}")
+            self._set_status(f"加载失败：{e}")
 
     # ---------- 绘图：单通道 + 频段能量 ----------
     def _hide_axis(self, ax):
@@ -986,7 +1071,8 @@ class EEGGuiBrowserEmbed:
         # 左上：波形
         self.ax_wv_a.clear()
         sig = eeg[epoch_idx, channel_idx, :]
-        self.ax_wv_a.plot(t, sig, linewidth=1.0)
+        color = ALERT_COLOR if sess.upper() == "EEG1" else FATIGUE_COLOR
+        self.ax_wv_a.plot(t, sig, linewidth=1.0, color=color)
         self.ax_wv_a.set_title(f"Waveform | {sid} | {sess} | Epoch {epoch_idx} | {ch_name}")
         self.ax_wv_a.set_xlabel("Time (s)")
         self.ax_wv_a.set_ylabel("Amplitude")
@@ -1002,7 +1088,7 @@ class EEGGuiBrowserEmbed:
         bp = _bandpowers_fft(sig, self.fs)
         bands = ["delta", "theta", "alpha", "beta"]
         vals = [bp[b] for b in bands]
-        self.ax_bp_a.bar(bands, vals)
+        self.ax_bp_a.bar(bands, vals, color=color)
         self.ax_bp_a.set_title("Band power (FFT) | δ θ α β")
         self.ax_bp_a.set_ylabel("Power (a.u.)")
         self.ax_bp_a.spines["top"].set_visible(False)
@@ -1026,7 +1112,7 @@ class EEGGuiBrowserEmbed:
 
         # 左上：EEG1 波形
         self.ax_wv_a.clear()
-        self.ax_wv_a.plot(t1, sig1, linewidth=1.0,color="#E91E63")
+        self.ax_wv_a.plot(t1, sig1, linewidth=1.0, color=ALERT_COLOR)
         self.ax_wv_a.set_title(f"Waveform | {sid} | {sess1} | Epoch {epoch_a} | {labels1[ch_a]}")
         self.ax_wv_a.set_xlabel("Time (s)")
         self.ax_wv_a.set_ylabel("Amplitude")
@@ -1035,7 +1121,7 @@ class EEGGuiBrowserEmbed:
 
         # 右上：EEG4 波形
         self.ax_wv_f.clear()
-        self.ax_wv_f.plot(t4, sig4, linewidth=1.0)
+        self.ax_wv_f.plot(t4, sig4, linewidth=1.0, color=FATIGUE_COLOR)
         self.ax_wv_f.set_title(f"Waveform | {sid} | {sess4} | Epoch {epoch_f} | {labels4[ch_f]}")
         self.ax_wv_f.set_xlabel("Time (s)")
         self.ax_wv_f.set_ylabel("Amplitude")
@@ -1046,7 +1132,7 @@ class EEGGuiBrowserEmbed:
         self.ax_bp_a.clear()
         bp1 = _bandpowers_fft(sig1, self.fs)
         bands = ["delta", "theta", "alpha", "beta"]
-        self.ax_bp_a.bar(bands, [bp1[b] for b in bands],color="#E91E63")
+        self.ax_bp_a.bar(bands, [bp1[b] for b in bands], color=ALERT_COLOR)
         self.ax_bp_a.set_title("Band power | EEG1")
         self.ax_bp_a.set_ylabel("Power (a.u.)")
         self.ax_bp_a.spines["top"].set_visible(False)
@@ -1055,7 +1141,7 @@ class EEGGuiBrowserEmbed:
         # 右下：EEG4 频段能量
         self.ax_bp_f.clear()
         bp4 = _bandpowers_fft(sig4, self.fs)
-        self.ax_bp_f.bar(bands, [bp4[b] for b in bands])
+        self.ax_bp_f.bar(bands, [bp4[b] for b in bands], color=FATIGUE_COLOR)
         self.ax_bp_f.set_title("Band power | EEG4")
         self.ax_bp_f.set_ylabel("Power (a.u.)")
         self.ax_bp_f.spines["top"].set_visible(False)
@@ -1111,6 +1197,34 @@ class EEGGuiBrowserEmbed:
         )
 
         self.fig_multi.tight_layout()
+        self.canvas_multi.draw()
+
+    def _update_single_layout(self, compare: bool):
+        if compare:
+            self.ax_wv_a.set_position(self._single_layout_positions["wv_a"])
+            self.ax_wv_f.set_position(self._single_layout_positions["wv_f"])
+            self.ax_bp_a.set_position(self._single_layout_positions["bp_a"])
+            self.ax_bp_f.set_position(self._single_layout_positions["bp_f"])
+            self.ax_wv_f.set_visible(True)
+            self.ax_bp_f.set_visible(True)
+            self.ax_wv_f.set_axis_on()
+            self.ax_bp_f.set_axis_on()
+        else:
+            self.ax_wv_a.set_position([0.08, 0.55, 0.86, 0.35])
+            self.ax_bp_a.set_position([0.08, 0.10, 0.86, 0.35])
+            self.ax_wv_f.set_visible(False)
+            self.ax_bp_f.set_visible(False)
+        self.canvas_single.draw()
+
+    def _update_multi_layout(self, compare: bool):
+        if compare:
+            self.ax_multi_a.set_position(self._multi_layout_positions["multi_a"])
+            self.ax_multi_f.set_position(self._multi_layout_positions["multi_f"])
+            self.ax_multi_f.set_visible(True)
+            self.ax_multi_f.set_axis_on()
+        else:
+            self.ax_multi_a.set_position([0.08, 0.12, 0.86, 0.78])
+            self.ax_multi_f.set_visible(False)
         self.canvas_multi.draw()
 
     # ---------- 绘图：RMS / ΔRMS ----------

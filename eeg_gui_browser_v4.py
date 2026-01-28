@@ -287,6 +287,8 @@ class EEGGuiBrowserEmbed:
         self.subjects = scan_subject_files(root_dir)
         self._has_loaded = False
         self._last_selected_index = 0
+        self._preview_job = None
+        self._preview_running = False
 
         if len(self.subjects) == 0:
             raise RuntimeError("未识别到 *_EEG1.npy / *_EEG4.npy 文件，请检查命名或目录。")
@@ -307,6 +309,7 @@ class EEGGuiBrowserEmbed:
             self.root.option_add("*Font", ("Microsoft YaHei", 10))
         except Exception:
             pass
+        self._apply_ui_theme()
 
         # ========== 顶部布局：左（被试） + 右（控制） ==========
         top = ttk.Frame(self.root, padding=10)
@@ -576,6 +579,27 @@ class EEGGuiBrowserEmbed:
         self.status_bar.grid(row=2, column=0, sticky="ew")
 
     # ---------- 数据加载 ----------
+    def _apply_ui_theme(self):
+        try:
+            style = ttk.Style(self.root)
+            if "clam" in style.theme_names():
+                style.theme_use("clam")
+            style.configure("TFrame", background="#0F172A")
+            style.configure("TLabel", background="#0F172A", foreground="#E2E8F0")
+            style.configure("TLabelFrame", background="#0F172A", foreground="#E2E8F0")
+            style.configure("TLabelFrame.Label", background="#0F172A", foreground="#93C5FD")
+            style.configure("TButton", background="#1E293B", foreground="#E2E8F0", padding=(6, 3))
+            style.map("TButton", background=[("active", "#334155")])
+            style.configure("TCheckbutton", background="#0F172A", foreground="#E2E8F0")
+            style.configure("TRadiobutton", background="#0F172A", foreground="#E2E8F0")
+            style.configure("TCombobox", fieldbackground="#1E293B", foreground="#E2E8F0")
+            style.configure("TNotebook", background="#0F172A", borderwidth=0)
+            style.configure("TNotebook.Tab", background="#1E293B", foreground="#E2E8F0", padding=(10, 6))
+            style.map("TNotebook.Tab", background=[("selected", "#2563EB")], foreground=[("selected", "#F8FAFC")])
+            self.root.configure(bg="#0F172A")
+        except Exception:
+            pass
+
     def _load_eeg(self, sid: str, sess: str):
         key = (sid, sess)
         if key in self._cache:
@@ -597,6 +621,19 @@ class EEGGuiBrowserEmbed:
 
     def _maybe_preview(self):
         if self._has_loaded:
+            self._schedule_preview()
+
+    def _schedule_preview(self, delay_ms: int = 200):
+        if self._preview_job is not None:
+            try:
+                self.root.after_cancel(self._preview_job)
+            except Exception:
+                pass
+        self._preview_job = self.root.after(delay_ms, self._run_scheduled_preview)
+
+    def _run_scheduled_preview(self):
+        self._preview_job = None
+        if not self._preview_running:
             self.on_preview()
 
     def _on_subject_select(self):
@@ -987,9 +1024,13 @@ class EEGGuiBrowserEmbed:
 
     # ---------- 主刷新 ----------
     def on_preview(self):
+        if self._preview_running:
+            return
+        self._preview_running = True
         sid = self.get_selected_subject()
         if sid is None:
             messagebox.showwarning("提示", "请先选择一个被试。")
+            self._preview_running = False
             return
 
         # 读取 epoch/channel
@@ -998,6 +1039,7 @@ class EEGGuiBrowserEmbed:
             channel_idx = int(self.channel_entry.get())
         except Exception:
             messagebox.showerror("错误", "Epoch/Channel 必须是整数。")
+            self._preview_running = False
             return
 
         compare = bool(self.compare_var.get())
@@ -1067,6 +1109,8 @@ class EEGGuiBrowserEmbed:
         except Exception as e:
             messagebox.showerror("错误", f"加载/绘图失败：\n{e}")
             self._set_status(f"加载失败：{e}")
+        finally:
+            self._preview_running = False
 
     # ---------- 绘图：单通道 + 频段能量 ----------
     def _hide_axis(self, ax):
